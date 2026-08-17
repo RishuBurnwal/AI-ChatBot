@@ -1,116 +1,168 @@
 # Nexus Support
 
-Nexus Support is an AI-powered CRM and live-support application with two surfaces:
+Nexus Support is a full-stack AI customer support platform with a browser-based chat widget and a live admin dashboard. It supports AI-assisted conversations, realtime handoff to human agents, permissions capture, form collection, knowledge-base grounding, and WebRTC voice/video/screen-share calls.
 
-- `/widget` — customer chat, permissions, voice/video calls, screen sharing, and human handoff.
-- `/admin` — live-chat operations, customer history, form submissions, knowledge base, AI persona, providers, and settings.
+The app is built around two main surfaces:
 
-An AI assistant (configurable across Groq, OpenRouter, OpenAI, Google Gemini, NVIDIA, and Perplexity) answers customers in real time, is grounded in an admin-managed knowledge base, and only transfers a chat to a human agent after an explicit, AI-verified escalation decision.
+- `/widget` — customer-facing chat, permission prompts, multi-provider AI replies, and call controls
+- `/admin` — operations dashboard for sessions, users, handoffs, forms, knowledge documents, AI config, and system settings
 
-## Features
+## What it does
 
-- **AI chat widget** — multi-provider LLM replies with a rolling conversation summary and retrieval-augmented knowledge injection on every turn.
-- **Live agent handoff** — AI-classified `needs_human` decisions create a handoff; greetings, thanks, short text, and low confidence alone never transfer a chat, and provider failure keeps the session active instead of faking a reply.
-- **Realtime operations** — Socket.IO pushes messages, typing indicators, AI-verification status, handoff state, and agent-takeover updates between the widget and Admin.
-- **Voice, video & screen share** — peer-to-peer WebRTC with real `MediaStream` tracks, ICE signaling, mute/video controls, and clean track cleanup.
-- **CRM & history** — customers, sessions, transcripts, permissions, and handoffs persisted to SQLite and mirrored to a live Excel workbook you can download from Admin.
-- **Admin dashboard** — Live Chats, Users & Sessions, Form Submissions, Forms Builder, Knowledge Base, AI Persona & Rules, AI Provider, Permissions, and General Settings.
-- **Form submissions export** — date-filtered, formatted Excel download of every submitted customer form.
+- Answers customer questions using an AI provider chain with configurable fallbacks
+- Grounds each reply in an admin-managed knowledge base and recent conversation context
+- Only escalates to a human when the AI explicitly decides the user needs one
+- Prevents handoff on greetings, thanks, small talk, or low-confidence conversational replies
+- Keeps the live UI synchronized through Socket.IO and pushes session updates to Admin in realtime
+- Persists sessions, user data, permissions, handoffs, and form submissions in SQLite
+- Mirrors the database into a downloadable Excel workbook for reporting and export
+- Includes WebRTC voice/video/screen sharing with browser permission handling and clean media teardown
+
+## Core features
+
+- AI chat widget with provider selection, persona guidance, and conversational summary memory
+- Human takeover and release workflows for active sessions
+- Realtime typing, session, and handoff notifications
+- Permission consent management for location, camera, microphone, and screen access
+- Knowledge-document ingestion from PDF, DOCX, Markdown, and TXT files
+- Form-field and question-tree management for structured intake flows
+- Exportable form submission reports filtered by date range
+- Admin configuration for AI persona, rules, provider selection, and general company settings
 
 ## Tech stack
 
-| Layer | Technology |
+| Layer | Stack |
 | --- | --- |
 | Frontend | TanStack Start, React 19, Vite, Tailwind CSS v4, shadcn/ui |
-| Backend | Express, Socket.IO, Multer |
-| AI providers | Groq, OpenRouter, OpenAI, Google Gemini, NVIDIA NIM, Perplexity (adapter interface) |
-| Persistence | SQLite (`better-sqlite3`) + live Excel mirror (`exceljs`) |
-| Documents | PDF, DOCX, Markdown, TXT extraction for the knowledge base |
-| Tests | Vitest, Playwright (Chromium), Python `unittest` |
+| Backend | Express 5, Socket.IO, Multer |
+| AI providers | Groq, OpenRouter, OpenAI, Google Gemini, NVIDIA NIM, Perplexity |
+| Persistence | SQLite via better-sqlite3 + Excel mirror via ExcelJS |
+| Document ingestion | PDF, DOCX, Markdown, TXT parsing |
+| Testing | Vitest, Playwright, Python unittest |
+
+## Project architecture
+
+```text
+server/
+  app.ts                  # HTTP API layer and validation entry points
+  index.ts                # API server bootstrap and realtime wiring
+  realtime-server.ts      # Socket.IO room management and WebRTC signaling
+  core/
+    support-service.ts    # AI message processing, context setup, handoff decisions
+    provider-registry.ts  # provider interface + fallback selection
+    provider-adapters.ts  # OpenAI-compatible and Google adapters
+    sqlite-repository.ts  # SQLite persistence, migrations, Excel mirror
+    domain.ts             # permission normalization and question graph validation
+    document-service.ts   # file text extraction for knowledge docs
+src/
+  routes/                 # widget and admin routes
+  components/widget/      # chat UI, permission prompts, calls, forms
+  lib/                    # API clients, realtime helpers, WebRTC logic, CRM store
+run.py                   # one-command local launcher for the app and API
+```
+
+## Runtime behavior and safeguards
+
+The system follows explicit handoff rules:
+
+- Every AI-mode customer message is evaluated before a human handoff is created
+- Greetings, thanks, short ambiguous messages, and low-confidence replies are not automatically escalated
+- A handoff requires a clear `needs_human` decision and is blocked if verification fails
+- There is no public browser endpoint for direct handoff escalation; the flow must pass through the backend service
+- If a provider request fails, the app keeps the session active instead of pretending the AI answered
+
+Realtime updates are pushed through Socket.IO for:
+
+- chat updates
+- typing indicators
+- handoff state changes
+- agent takeover and release events
+- WebRTC signaling and calls
 
 ## Local development
 
-Requirements:
+### Requirements
 
-- **Node.js 22 or newer** and npm.
-- **Python 3.9 or newer** (only for the `run.py` launcher and its tests).
+- Node.js 22+
+- npm
+- Python 3.9+ for the launcher script
 
-The easiest option starts everything and opens the widget automatically:
+### Fastest start
 
-```sh
+```bash
 python run.py
 ```
 
-Press `Ctrl+C` once to stop both servers.
+This starts the API and frontend together and opens the app in the browser. It also prints LAN and hotspot URLs for mobile access, including the Windows Mobile Hotspot pattern at `192.168.137.1` when available.
 
-The launcher binds the web app and API to all network interfaces and prints every detected LAN URL. When an Android phone is connected to Windows Mobile Hotspot, try the printed `192.168.137.1` URL first, for example:
+### Manual start
 
-```text
-http://192.168.137.1:5173/widget
-```
-
-If the phone cannot connect, set the laptop network profile to **Private** and allow Node.js through Windows Defender Firewall on private networks. Keep the hotspot enabled and confirm both devices are on the same hotspot network. The port may be higher than `5173` if that port is already occupied, so use the exact URL printed by `run.py`.
-
-Camera, microphone, and screen capture are browser-protected APIs. `localhost` is trusted, but a plain `http://192.168.x.x` address is not a secure context. Chat and realtime typing work over the LAN URL; for physical-device calls and screen sharing, expose the Vite URL through a trusted HTTPS development tunnel or deploy behind HTTPS. Android browser support for screen capture can vary, so verify `navigator.mediaDevices.getDisplayMedia` on the target browser.
-
-Or start each process manually:
-
-```sh
+```bash
 npm install
 npm run dev:api
 npm run dev
 ```
 
-The UI runs on the Vite URL and proxies `/api` and Socket.IO to port `8787`.
+The API listens on port `8787` and the Vite frontend serves the widget/admin UI on its local port.
 
-Copy `.env.example` to `.env.local` and add only the provider credentials you intend to use. Keys remain server-side and are never returned to the browser.
+### Environment setup
 
-## Verification
+Copy `.env.example` to `.env.local` and add only the provider keys you need. Keep all secrets server-side. The app loads them from the backend environment and never exposes them to the browser.
 
-```sh
-npm test                # unit + integration tests (Vitest)
-npm run test:coverage   # test run with coverage report
-npm run test:e2e        # Playwright end-to-end tests (needs `npx playwright install chromium` on first run)
-npm run lint            # ESLint
+Example keys in `.env.local`:
+
+```env
+AI_PROVIDER=groq
+GROQ_API_KEY=
+OPENAI_API_KEY=
+OPENROUTER_API_KEY=
+GEMINI_API_KEY=
+PERPLEXITY_API_KEY=
+NVIDIA_API_KEY=
+```
+
+## Verification and quality checks
+
+```bash
+npm test                # Vitest unit/integration tests
+npm run test:coverage   # test coverage report
+npm run test:e2e        # Playwright end-to-end suite
+npm run lint            # ESLint validation
 npm run build           # production build
-python test_run.py      # launcher tests
+python test_run.py      # launcher validation tests
 ```
 
-## Project structure
+## Data model and persistence
 
-```text
-server/                 # Express API, Socket.IO realtime, AI adapters, persistence
-  app.ts                # HTTP API routes
-  index.ts              # server bootstrap + realtime wiring
-  realtime-server.ts    # Socket.IO rooms and WebRTC signaling
-  core/
-    provider-registry.ts  # AI provider interface + fallback chain
-    provider-adapters.ts  # OpenAI-compatible, Google adapters
-    support-service.ts    # AI turn evaluation, handoff decisions
-    sqlite-repository.ts  # SQLite persistence + Excel mirror
-    domain.ts             # permission + question-graph validation
-    document-service.ts   # PDF/DOCX/MD/TXT text extraction
-src/                    # TanStack Start frontend
-  routes/               # /widget and /admin/* pages
-  components/widget/    # chat panel, intake form, calls, permissions
-  lib/                  # API client, CRM store, realtime, WebRTC
-tests/                  # Playwright e2e specs
-run.py                  # one-command launcher (LAN + hotspot URLs)
-```
+The database is stored under `data/` and is kept in sync with an `.xlsx` workbook mirror. The app stores:
 
-## Architecture
+- users
+- sessions
+- messages
+- permissions
+- handoffs
+- form fields
+- question trees
+- settings
+- knowledge documents
 
-The provider interface and fallback registry live in `server/core/provider-registry.ts`. HTTP APIs are in `server/app.ts`; realtime session rooms and WebRTC signaling are in `server/realtime-server.ts`, wired up in `server/index.ts`.
+Deleting a customer cascades to that customer’s sessions, messages, permissions, and handoffs in both the SQLite database and the mirrored workbook.
 
-All customer, session, message, permission, form, question, setting, and knowledge metadata is saved live to `data/nexus-support.sqlite`. Every successful mutation also refreshes `data/nexus-support.xlsx`. The workbook can be downloaded from the **Users & Sessions** page in Admin (full workbook) and the **Form Submissions** page (date-filtered). Deleting a customer cascades to that customer's sessions, messages, permissions, and handoffs in both files.
+## Notes for mobile and browser permissions
 
-API keys are intentionally excluded from SQLite and Excel. They are loaded server-side from `.env.local`, which is ignored by Git.
+For mobile testing over a LAN or hotspot:
 
-## Realtime and handoff rules
+- use the exact URL printed by `run.py`
+- ensure the device is on the same hotspot or LAN network
+- allow Node.js through Windows Defender Firewall on private networks when needed
+- prefer `https` or a secure dev tunnel for physical-device calls and screen sharing because browser media APIs require secure contexts
 
-- Socket.IO pushes messages, typing status, AI-verification status, handoff state, and agent-transfer updates between the widget and Admin.
-- Every AI-mode customer message is evaluated by the configured AI provider before a handoff decision.
-- Greetings, thanks, short ambiguous text, and low confidence alone cannot trigger a handoff.
-- A handoff requires an explicit `needs_human` decision from AI and is blocked completely if AI verification fails.
-- A direct public handoff endpoint is intentionally unavailable, preventing the browser from bypassing verification.
-- Voice/video calls and screen sharing use actual `MediaStream` tracks, peer-to-peer WebRTC negotiation, ICE signaling, mute/video controls, and track cleanup.
+## Repository status
+
+This project is configured for a GitHub repo at:
+
+- https://github.com/RishuBurnwal/Chat-support.git
+
+## License
+
+This project is currently configured as a local workspace application without an explicit license file. If you intend to publish the project publicly, add a `LICENSE` file and confirm the appropriate open-source terms before distributing it.
